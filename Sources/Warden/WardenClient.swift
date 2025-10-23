@@ -1,5 +1,5 @@
 //
-//  File.swift
+//  WardenClient.swift
 //  warden-ios
 //
 //  Created by Carlos Petit on 23-10-25.
@@ -11,9 +11,13 @@ import AuthenticationServices
 public struct WardenConfig {
     public let apiKey: String
     public let apiBaseUrl: String
-    public init(apiKey: String, apiBaseUrl: String) {
+    /// Origin del Relying Party (ej: https://warden-demo-ios.app)
+    public let rpOrigin: String
+
+    public init(apiKey: String, apiBaseUrl: String, rpOrigin: String) {
         self.apiKey = apiKey
         self.apiBaseUrl = apiBaseUrl
+        self.rpOrigin = rpOrigin
     }
 }
 
@@ -51,7 +55,7 @@ public final class WardenClient: NSObject {
 
     public var isConfigured: Bool {
         guard let c = config else { return false }
-        return !c.apiKey.isEmpty && !c.apiBaseUrl.isEmpty
+        return !c.apiKey.isEmpty && !c.apiBaseUrl.isEmpty && !c.rpOrigin.isEmpty
     }
 
     /// Llama a /passkey/register-options → inicia flujo de Passkey → POST /passkey/verify-registration
@@ -63,8 +67,12 @@ public final class WardenClient: NSObject {
             let tempToken: String
         }
 
+        // Agregamos origin en query y header (robusto para cualquier backend)
+        let encodedEmail = email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email
+        let encodedOrigin = try encodedRpOriginQueryParam()
+
         let env: RegisterOptionsEnvelope = try await getJson(
-            path: "/passkey/register-options?username=\(email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email)"
+            path: "/passkey/register-options?username=\(encodedEmail)&origin=\(encodedOrigin)"
         )
 
         let rpId = env.options.rp.id
@@ -78,7 +86,6 @@ public final class WardenClient: NSObject {
             name: userName,
             userID: userID
         )
-        // Opcional: parámetros avanzados (residentKey, userVerification) según tu política
         // request.userVerificationPreference = .preferred
 
         let registration = try await performAuthorization(requests: [request], anchor: presentingAnchor)
@@ -98,7 +105,6 @@ public final class WardenClient: NSObject {
                     "clientDataJSON": reg.rawClientDataJSON.base64urlString
                 ],
                 "type": "public-key",
-                // Extensiones opcionales
             ]
         ]
 
@@ -113,14 +119,18 @@ public final class WardenClient: NSObject {
             let options: PublicKeyCredentialRequestOptions
             let tempToken: String
         }
-        let env: LoginOptionsEnvelope = try await getJson(path: "/passkey/login-options")
 
-        let rpId = env.options.rpId ?? env.options.rp?.id ?? "" // soporte por si incluyes rp en request
+        let encodedOrigin = try encodedRpOriginQueryParam()
+        let env: LoginOptionsEnvelope = try await getJson(
+            path: "/passkey/login-options?origin=\(encodedOrigin)"
+        )
+
+        let rpId = env.options.rpId ?? env.options.rp?.id ?? ""
         let challenge = try Data(base64url: env.options.challenge)
 
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: rpId)
         let request = provider.createCredentialAssertionRequest(challenge: challenge)
-        // Tip: si tu backend restringe credenciales permitidas, puedes setear allowedCredentials:
+
         if let allow = env.options.allowCredentials, !allow.isEmpty {
             request.allowedCredentials = allow.compactMap { cred in
                 guard let id = try? Data(base64url: cred.id) else { return nil }
@@ -182,6 +192,10 @@ public final class WardenClient: NSObject {
         var req = URLRequest(url: try baseURL(path))
         req.httpMethod = method
         req.setValue(cfg.apiKey, forHTTPHeaderField: "x-api-key")
+
+        // 👉 Enviamos también el origin por header (además de la query)
+        req.setValue(cfg.rpOrigin, forHTTPHeaderField: "x-client-origin")
+
         if let body = jsonBody {
             req.httpBody = body
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -209,6 +223,17 @@ public final class WardenClient: NSObject {
         delegate.anchor = anchor
         controller.performRequests()
         return try await delegate.result()
+    }
+
+    // MARK: - Helpers
+    private func encodedRpOriginQueryParam() throws -> String {
+        guard let origin = config?.rpOrigin, !origin.isEmpty else {
+            throw WardenError("rpOrigin no configurado")
+        }
+        guard URL(string: origin) != nil else {
+            throw WardenError("rpOrigin inválido: \(origin)")
+        }
+        return origin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? origin
     }
 }
 
@@ -274,7 +299,6 @@ extension Data {
     }
 }
 
-
 private extension Array where Element == UInt8 {
     func base64urlString() -> String { Data(self).base64urlString }
 }
@@ -283,8 +307,3 @@ private extension Data {
     /// Para credentialID/userID que son Data → base64url
     var bytes: [UInt8] { [UInt8](self) }
 }
-
-private extension Data {
-    // sugar duplicado (Xcode te avisará; deja uno si prefieres)
-}
-
