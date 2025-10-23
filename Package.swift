@@ -4,23 +4,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "warden-ios",
+    name: "Warden",
+    platforms: [.iOS(.v16)],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
-        .library(
-            name: "warden-ios",
-            targets: ["warden-ios"]
-        ),
+        .library(name: "Warden", targets: ["Warden"]),
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "warden-ios"
+            name: "Warden",
+            path: "Sources/Warden"
         ),
         .testTarget(
-            name: "warden-iosTests",
-            dependencies: ["warden-ios"]
+            name: "WardenTests",
+            dependencies: ["Warden"],
+            path: "Tests/WardenTests"
         ),
     ]
 )
