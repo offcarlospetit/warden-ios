@@ -30,13 +30,14 @@ public struct LoginResult: Decodable {
     }
 }
 
-public final class WardenError: NSError {
+public final class WardenError: NSError, @unchecked Sendable {
     public init(_ message: String, status: Int? = nil) {
         super.init(domain: "WardenError", code: status ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
     }
     required init?(coder: NSCoder) { fatalError() }
 }
 
+@MainActor
 public final class WardenClient: NSObject {
     public static let shared = WardenClient()
     private override init() {}
@@ -90,11 +91,11 @@ public final class WardenClient: NSObject {
         let payload: [String: Any] = [
             "tempToken": env.tempToken,
             "registrationResponse": [
-                "id": reg.credentialID.base64urlString(),
-                "rawId": reg.credentialID.base64urlString(),
+                "id": reg.credentialID.base64urlString,
+                "rawId": reg.credentialID.base64urlString,
                 "response": [
-                    "attestationObject": reg.rawAttestationObject?.base64urlString() ?? "",
-                    "clientDataJSON": reg.rawClientDataJSON.base64urlString()
+                    "attestationObject": reg.rawAttestationObject?.base64urlString ?? "",
+                    "clientDataJSON": reg.rawClientDataJSON.base64urlString
                 ],
                 "type": "public-key",
                 // Extensiones opcionales
@@ -137,14 +138,14 @@ public final class WardenClient: NSObject {
         let payload: [String: Any] = [
             "tempToken": env.tempToken,
             "authenticationResponse": [
-                "id": auth.credentialID.base64urlString(),
-                "rawId": auth.credentialID.base64urlString(),
+                "id": auth.credentialID.base64urlString,
+                "rawId": auth.credentialID.base64urlString,
                 "type": "public-key",
                 "response": [
-                    "authenticatorData": auth.rawAuthenticatorData.base64urlString(),
-                    "clientDataJSON": auth.rawClientDataJSON.base64urlString(),
-                    "signature": auth.signature.base64urlString(),
-                    "userHandle": (auth.userID.isEmpty ? "" : auth.userID.base64urlString())
+                    "authenticatorData": auth.rawAuthenticatorData.base64urlString,
+                    "clientDataJSON": auth.rawClientDataJSON.base64urlString,
+                    "signature": auth.signature.base64urlString,
+                    "userHandle": (auth.userID.isEmpty ? "" : auth.userID.base64urlString)
                 ]
             ]
         ]
@@ -256,37 +257,33 @@ private struct PublicKeyCredentialRequestOptions: Decodable {
 }
 
 // MARK: - Base64URL helpers
-private extension Data {
+extension Data {
     init(base64url: String) throws {
         var s = base64url.replacingOccurrences(of: "-", with: "+")
                          .replacingOccurrences(of: "_", with: "/")
-        let padding = (4 - s.count % 4) % 4
-        if padding > 0 { s.append(String(repeating: "=", count: padding)) }
+        let pad = (4 - s.count % 4) % 4
+        if pad > 0 { s.append(String(repeating: "=", count: pad)) }
         guard let d = Data(base64Encoded: s) else { throw WardenError("base64url inválido") }
         self = d
     }
-    func base64urlString() -> String {
-        return self.base64EncodedString()
-            .replacingOccurrences(of: "=", with: "")
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-    }
-}
-private extension Array where Element == UInt8 {
-    func base64urlString() -> String { Data(self).base64urlString() }
-}
-private extension Data {
-    /// Para credentialID/userID que son Data → base64url
-    var bytes: [UInt8] { [UInt8](self) }
-}
-private extension Data {
-    func base64urlString() -> String {
+    var base64urlString: String {
         self.base64EncodedString()
             .replacingOccurrences(of: "=", with: "")
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
     }
 }
+
+
+private extension Array where Element == UInt8 {
+    func base64urlString() -> String { Data(self).base64urlString }
+}
+
+private extension Data {
+    /// Para credentialID/userID que son Data → base64url
+    var bytes: [UInt8] { [UInt8](self) }
+}
+
 private extension Data {
     // sugar duplicado (Xcode te avisará; deja uno si prefieres)
 }
